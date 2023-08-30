@@ -54,6 +54,7 @@ module Azure::Storage::Common
     # * +:use_path_style_uri+             - String. Whether use path style URI for specified endpoints
     # * +:ca_file+                        - String. File path of the CA file if having issue with SSL
     # * +:user_agent_prefix+              - String. The user agent prefix that can identify the application calls the library
+    # * +:proxy_url+                      - String. The URL of a proxy server used to perform HTTP operations
     #
     # The valid set of options include:
     # * Storage Emulator: +:use_development_storage+ required, +:development_storage_proxy_uri+ optionally
@@ -107,6 +108,7 @@ module Azure::Storage::Common
       # * +:ssl_min_version+                - Symbol. The min ssl version supported, only supported in Ruby 2.5+
       # * +:ssl_max_version+                - Symbol. The max ssl version supported, only supported in Ruby 2.5+
       # * +:user_agent_prefix+              - String. The user agent prefix that can identify the application calls the library
+      # * +:proxy_url+                      - String. The URL of a proxy server used to perform HTTP operations
       #
       # The valid set of options include:
       # * Storage Emulator: +:use_development_storage+ required, +:development_storage_proxy_uri+ optionally

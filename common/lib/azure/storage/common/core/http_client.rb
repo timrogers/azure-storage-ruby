@@ -55,7 +55,9 @@ module Azure::Storage::Common::Core
           ssl_options[:ca_file] = self.ca_file if self.ca_file
           ssl_options[:verify] = true
         end
-        proxy_options = if ENV["HTTP_PROXY"]
+        proxy_options = if self.proxy_url
+                          URI::parse(self.proxy_url)
+                        elsif ENV["HTTP_PROXY"]
                           URI::parse(ENV["HTTP_PROXY"])
                         elsif ENV["HTTPS_PROXY"]
                           URI::parse(ENV["HTTPS_PROXY"])

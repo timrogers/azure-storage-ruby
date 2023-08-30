@@ -30,7 +30,7 @@ require "azure/storage/common/core/auth/anonymous_signer"
 
 module Azure::Storage::Common
   module ClientOptions
-    attr_accessor :ca_file, :ssl_version, :ssl_min_version, :ssl_max_version
+    attr_accessor :ca_file, :ssl_version, :ssl_min_version, :ssl_max_version, :proxy_url
 
     # Public: Reset options for [Azure::Storage::Common::Client]
     #
@@ -58,6 +58,7 @@ module Azure::Storage::Common
     # * +:ssl_version+                    - Symbol. The ssl version to be used, sample: :TLSv1_1, :TLSv1_2, for the details, see https://github.com/ruby/openssl/blob/master/lib/openssl/ssl.rb
     # * +:ssl_min_version+                - Symbol. The min ssl version supported, only supported in Ruby 2.5+
     # * +:ssl_max_version+                - Symbol. The max ssl version supported, only supported in Ruby 2.5+
+    # * +:proxy_url+                      - String. The URL of a proxy server used to perform HTTP operations
     #
     # The valid set of options include:
     # * Storage Emulator: +:use_development_storage+ required, +:development_storage_proxy_uri+ optionally
@@ -81,7 +82,7 @@ module Azure::Storage::Common
         # When the options are provided via singleton setup: Azure::Storage.setup()
         options = setup_options if options.length == 0
 
-        options = parse_connection_string(options[:storage_connection_string]) if options[:storage_connection_string]
+        options = parse_connection_string(options[:storage_connection_string], hash_except(options, :storage_connection_string)) if options[:storage_connection_string]
       end
 
       # Load from environment when no valid input
@@ -91,6 +92,7 @@ module Azure::Storage::Common
       @ssl_version = options.delete(:ssl_version)
       @ssl_min_version = options.delete(:ssl_min_version)
       @ssl_max_version = options.delete(:ssl_max_version)
+      @proxy_url = options.delete(:proxy_url)
       @options = filter(options)
       self.send(:reset_config!, @options) if self.respond_to?(:reset_config!)
       self
@@ -125,7 +127,8 @@ module Azure::Storage::Common
         :storage_file_host,
         :storage_dns_suffix,
         :default_endpoints_protocol,
-        :use_path_style_uri
+        :use_path_style_uri,
+        :proxy_url
       ]
     end
 
@@ -143,7 +146,8 @@ module Azure::Storage::Common
         "AZURE_STORAGE_QUEUE_HOST" => :storage_queue_host,
         "AZURE_STORAGE_FILE_HOST" => :storage_file_host,
         "AZURE_STORAGE_SAS_TOKEN" => :storage_sas_token,
-        "AZURE_STORAGE_DNS_SUFFIX" => :storage_dns_suffix
+        "AZURE_STORAGE_DNS_SUFFIX" => :storage_dns_suffix,
+        "AZURE_STORAGE_PROXY_URL" => :proxy_url
       }
     end
 
@@ -198,7 +202,7 @@ module Azure::Storage::Common
         begin
           results = validated_options(opts,
                                       required: [:storage_connection_string],
-                                      optional: [:use_path_style_uri])
+                                      optional: [:use_path_style_uri, :proxy_url])
           results[:use_path_style_uri] = results.key?(:use_path_style_uri)
           normalize_hosts(results)
           return results
@@ -210,7 +214,7 @@ module Azure::Storage::Common
           results = validated_options(opts,
                                       required: [:storage_account_name],
                                       only_one: [:storage_access_key, :storage_sas_token, :signer],
-                                      optional: [:default_endpoints_protocol, :storage_dns_suffix])
+                                      optional: [:default_endpoints_protocol, :storage_dns_suffix, :proxy_url])
           protocol = results[:default_endpoints_protocol] ||= StorageServiceClientConstants::DEFAULT_PROTOCOL
           suffix = results[:storage_dns_suffix] ||= StorageServiceClientConstants::DEFAULT_ENDPOINT_SUFFIX
           account = results[:storage_account_name]
@@ -228,7 +232,7 @@ module Azure::Storage::Common
           results = validated_options(opts,
                                       required: [:storage_account_name, :storage_access_key],
                                       at_least_one: [:storage_blob_host, :storage_table_host, :storage_file_host, :storage_queue_host],
-                                      optional: [:use_path_style_uri, :default_endpoints_protocol])
+                                      optional: [:use_path_style_uri, :default_endpoints_protocol, :proxy_url])
           results[:use_path_style_uri] = results.key?(:use_path_style_uri)
           normalize_hosts(results)
           return results
@@ -239,7 +243,7 @@ module Azure::Storage::Common
         begin
           results = validated_options(opts,
                                       at_least_one: [:storage_blob_host, :storage_table_host, :storage_file_host, :storage_queue_host],
-                                      optional: [:use_path_style_uri, :default_endpoints_protocol, :storage_sas_token])
+                                      optional: [:use_path_style_uri, :default_endpoints_protocol, :storage_sas_token, :proxy_url])
           results[:use_path_style_uri] = results.key?(:use_path_style_uri)
           normalize_hosts(results)
           # Adds anonymous signer if no sas token
@@ -253,6 +257,7 @@ module Azure::Storage::Common
           results = validated_options(opts,
                                       required: [:storage_account_name],
                                       only_one: [:storage_access_key, :storage_sas_token],
+                                      optional: [:proxy_url],
                                       at_least_one: [:storage_blob_host, :storage_table_host, :storage_file_host, :storage_queue_host])
           results[:use_path_style_uri] = results.key?(:use_path_style_uri)
           normalize_hosts(results)
@@ -319,7 +324,8 @@ module Azure::Storage::Common
           storage_dns_suffix: is_url,
           default_endpoints_protocol: lambda { |i| ["http", "https"].include? i.downcase },
           use_path_style_uri: is_true,
-          signer: lambda { |i| i.is_a? Azure::Core::Auth::Signer} 
+          proxy_url: is_url,
+          signer: lambda { |i| i.is_a? Azure::Core::Auth::Signer}
         }
 
         valid_options = required + at_least_one + only_one + optional
@@ -344,20 +350,26 @@ module Azure::Storage::Common
         opts
       end
 
-      def parse_connection_string(connection_string)
-        opts = {}
+      def parse_connection_string(connection_string, opts_without_connection_string = {})
+        opts_from_connection_string = {}
         connection_string.split(";").each do |i|
           e = i.index("=")
           raise InvalidConnectionStringError, Azure::Storage::Common::Core::SR::INVALID_CONNECTION_STRING if e < 0 || e == i.length - 1
           key, value = i[0..e - 1], i[e + 1..i.length - 1]
           raise InvalidConnectionStringError, Azure::Storage::Common::Core::SR::INVALID_CONNECTION_STRING_BAD_KEY % key unless ClientOptions.connection_string_mapping.key? key
           raise InvalidConnectionStringError, Azure::Storage::Common::Core::SR::INVALID_CONNECTION_STRING_EMPTY_KEY % key if value.length == 0
-          raise InvalidConnectionStringError, Azure::Storage::Common::Core::SR::INVALID_CONNECTION_STRING_DUPLICATE_KEY % key if opts.key? key
-          opts[ClientOptions.connection_string_mapping[key]] = value
+          raise InvalidConnectionStringError, Azure::Storage::Common::Core::SR::INVALID_CONNECTION_STRING_DUPLICATE_KEY % key if opts_from_connection_string.key? key
+          opts_from_connection_string[ClientOptions.connection_string_mapping[key]] = value
         end
-        raise InvalidConnectionStringError, Azure::Storage::Common::Core::SR::INVALID_CONNECTION_STRING if opts.length == 0
+        raise InvalidConnectionStringError, Azure::Storage::Common::Core::SR::INVALID_CONNECTION_STRING if opts_from_connection_string.length == 0
 
-        opts
+        opts_without_connection_string.merge(opts_from_connection_string)
+      end
+
+      def hash_except(hash, key)
+        duplicated_hash = hash.dup
+        duplicated_hash.delete(key)
+        duplicated_hash
       end
   end
 end

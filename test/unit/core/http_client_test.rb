@@ -19,7 +19,7 @@ describe Azure::Storage::Common::Core::HttpClient do
       end
     end
 
-    describe "when using a http proxy" do
+    describe "when using a http proxy configured using an environment variable" do
       let(:http_proxy_uri) { URI("http://localhost:80") }
 
       before do
@@ -35,7 +35,7 @@ describe Azure::Storage::Common::Core::HttpClient do
       end
     end
 
-    describe "when using a https proxy" do
+    describe "when using a https proxy configured using an environment variable" do
       let(:https_proxy_uri) { URI("https://localhost:443") }
 
       before do
@@ -48,6 +48,14 @@ describe Azure::Storage::Common::Core::HttpClient do
 
       it "should set the proxy configuration information on the https connection" do
         Azure::Storage::Common::Client::create.agents(uri).proxy.uri.must_equal https_proxy_uri
+      end
+    end
+
+    describe "when using a proxy configured on the client using arguments" do
+      let(:proxy_url) { "https://localhost:443" }
+
+      it "should set the proxy configuration information on the https connection" do
+        _(Azure::Storage::Common::Client::create({ proxy_url: proxy_url, storage_connection_string: "DefaultEndpointsProtocol=https;AccountName=mockaccount;AccountKey=bW9ja2tleQ==" }).agents(uri).proxy.uri).must_equal URI::parse(proxy_url)
       end
     end
   end
